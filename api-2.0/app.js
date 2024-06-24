@@ -11,6 +11,8 @@ const jwt = require('jsonwebtoken');
 const bearerToken = require('express-bearer-token');
 const cors = require('cors');
 const constants = require('./config/constants.json')
+const crypto = require('crypto');
+
 
 const host = process.env.HOST || constants.host;
 const port = process.env.PORT || constants.port;
@@ -236,6 +238,61 @@ app.post('/channels/:channelName/chaincodes/:chaincodeName', async function (req
     }
 });
 
+// HACER CONTRIBUCIÓN
+app.post('/contribution/make', async function (req, res) {
+    var campaignId = req.body.campaignId;
+    var donorId = req.body.donorId;
+    var amount = req.body.amount;
+    var orgName = req.body.orgName; // Asegúrate de pasar la organización del usuario
+    var username = req.body.username; // Asegúrate de pasar el username del usuario
+
+    logger.debug('End point : /contribution/make');
+    logger.debug('Campaign ID : ' + campaignId);
+    logger.debug('Donor ID : ' + donorId);
+    logger.debug('Amount : ' + amount);
+
+    if (!campaignId) {
+        res.json(getErrorMessage('\'campaignId\''));
+        return;
+    }
+    if (!donorId) {
+        res.json(getErrorMessage('\'donorId\''));
+        return;
+    }
+    if (!amount) {
+        res.json(getErrorMessage('\'amount\''));
+        return;
+    }
+    if (!orgName) {
+        res.json(getErrorMessage('\'orgName\''));
+        return;
+    }
+    if (!username) {
+        res.json(getErrorMessage('\'username\''));
+        return;
+    }
+
+    try {
+        let response = await helper.makeContribution(campaignId, donorId, amount, orgName, username);
+        logger.debug('Successfully submitted contribution transaction for campaign ID %s by donor ID %s', campaignId, donorId);
+
+        // Generate a unique transaction ID
+        var transactionId = crypto.randomBytes(20).toString('hex');
+        response.transactionId = transactionId;
+        res.json(response);
+    } catch (error) {
+        logger.error('Failed to submit contribution transaction: %s', error.message);
+        res.json({ success: false, message: error.message });
+    }
+});
+
+function getErrorMessage(field) {
+    return {
+        success: false,
+        message: `Missing required field ${field}`
+    };
+}
+
 app.get('/channels/:channelName/chaincodes/:chaincodeName', async function (req, res) {
     try {
         logger.debug('==================== QUERY BY CHAINCODE ==================');
@@ -291,6 +348,90 @@ app.get('/channels/:channelName/chaincodes/:chaincodeName', async function (req,
         res.send(response_payload)
     }
 });
+
+// LISTAR CONTRIBUCIONES DE UN USUARIO
+app.get('/contribution/user/:userId', async function (req, res) {
+    var userId = req.params.userId;
+    var orgName = req.query.orgName; // Asegúrate de pasar la organización del usuario
+    var username = req.query.username; // Asegúrate de pasar el username del usuario
+
+    logger.debug('End point : /contribution/user/' + userId);
+    logger.debug('User ID : ' + userId);
+
+    if (!userId) {
+        res.json(getErrorMessage('\'userId\''));
+        return;
+    }
+    if (!orgName) {
+        res.json(getErrorMessage('\'orgName\''));
+        return;
+    }
+    if (!username) {
+        res.json(getErrorMessage('\'username\''));
+        return;
+    }
+
+    try {
+        let contributions = await helper.getContributionsByUser(userId, orgName, username);
+        res.json({
+            success: true,
+            contributions: contributions
+        });
+    } catch (error) {
+        logger.error('Error fetching contributions for user %s: %s', userId, error.message);
+        res.json({
+            success: false,
+            message: 'Error fetching contributions'
+        });
+    }
+});
+
+
+
+// LISTAR CONTRIBUCIONES DE UNA CAMPAÑA
+app.get('/contribution/get/:campaignId', async function (req, res) {
+    var campaignId = req.params.campaignId;
+    var orgName = req.query.orgName; // Asegúrate de pasar la organización del usuario
+    var username = req.query.username; // Asegúrate de pasar el username del usuario
+
+    logger.debug('End point : /contribution/get/' + campaignId);
+    logger.debug('Campaign ID : ' + campaignId);
+
+    if (!campaignId) {
+        res.json(getErrorMessage('\'campaignId\''));
+        return;
+    }
+    if (!orgName) {
+        res.json(getErrorMessage('\'orgName\''));
+        return;
+    }
+    if (!username) {
+        res.json(getErrorMessage('\'username\''));
+        return;
+    }
+
+    try {
+        let contributions = await helper.getContributionsForCampaign(campaignId, orgName, username);
+        res.json({
+            success: true,
+            contributions: contributions
+        });
+    } catch (error) {
+        logger.error('Error fetching contributions for campaign %s: %s', campaignId, error.message);
+        res.json({
+            success: false,
+            message: 'Error fetching contributions'
+        });
+    }
+});
+
+function getErrorMessage(field) {
+    return {
+        success: false,
+        message: `Missing required field ${field}`
+    };
+}
+
 
 app.get('/qscc/channels/:channelName/chaincodes/:chaincodeName', async function (req, res) {
     try {

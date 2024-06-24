@@ -107,6 +107,70 @@ const getRegisteredUser = async (username, userOrg, isJson) => {
     return response
 }
 
+async function makeContribution(campaignId, donorId, amount, userOrg, username) {
+    const gateway = await getGateway(userOrg, username);
+
+    const network = await gateway.getNetwork('mychannel');
+    const contract = network.getContract('crowdfunding');
+
+    try {
+        await contract.submitTransaction('Contribute', campaignId, donorId, amount);
+        console.log('Transaction has been submitted');
+    } catch (error) {
+        console.error(`Failed to submit transaction: ${error}`);
+        throw new Error(`Failed to submit transaction: ${error}`);
+    } finally {
+        gateway.disconnect();
+    }
+
+    return {
+        success: true,
+        message: 'Transaction executed successfully'
+    };
+}
+
+async function getContributionsByUser(userId, userOrg, username) {
+    const gateway = await getGateway(userOrg, username);
+
+    const network = await gateway.getNetwork('mychannel');
+    const contract = network.getContract('crowdfunding');
+
+    let result;
+    try {
+        // Realizar la consulta al smart contract
+        result = await contract.evaluateTransaction('GetContributionsByUser', userId);
+        console.log('Transaction has been evaluated');
+    } catch (error) {
+        console.error(`Failed to evaluate transaction: ${error}`);
+        throw new Error(`Failed to evaluate transaction: ${error}`);
+    } finally {
+        gateway.disconnect();
+    }
+
+    return JSON.parse(result.toString());
+}
+
+async function getContributionsForCampaign(campaignId, userOrg, username) {
+    const gateway = await getGateway(userOrg, username);
+
+    const network = await gateway.getNetwork('mychannel');
+    const contract = network.getContract('crowdfunding');
+
+    let result;
+    try {
+        // Realizar la consulta al smart contract
+        result = await contract.evaluateTransaction('GetContributionsForCampaign', campaignId);
+        console.log('Transaction has been evaluated');
+    } catch (error) {
+        console.error(`Failed to evaluate transaction: ${error}`);
+        throw new Error(`Failed to evaluate transaction: ${error}`);
+    } finally {
+        gateway.disconnect();
+    }
+
+    return JSON.parse(result.toString());
+}
+
 const isUserRegistered = async (username, userOrg) => {
     const walletPath = await getWalletPath(userOrg)
     const wallet = await Wallets.newFileSystemWallet(walletPath);
@@ -114,7 +178,7 @@ const isUserRegistered = async (username, userOrg) => {
 
     const userIdentity = await wallet.get(username);
     if (userIdentity) {
-        console.log(`An identity for the user ${username} exists in the wallet`);
+        console.log(`An identity for the user ${username} exists in the wallet\n${walletPath}`);
         return true
     }
     return false
@@ -248,6 +312,9 @@ module.exports = {
     getWalletPath: getWalletPath,
     getRegisteredUser: getRegisteredUser,
     isUserRegistered: isUserRegistered,
-    registerAndGerSecret: registerAndGerSecret
-
+    registerAndGerSecret: registerAndGerSecret,
+    makeContribution: makeContribution,
+    getContributionsByUser: getContributionsByUser,
+    getContributionsForCampaign: getContributionsForCampaign
 }
+

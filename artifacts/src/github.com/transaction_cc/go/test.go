@@ -8,75 +8,234 @@ import (
 	"github.com/hyperledger/fabric/common/flogging"
 )
 
-// SmartContract provides functions for managing shares
-type StockTxContract struct {
+type CrowdfundingContract struct {
 	contractapi.Contract
 }
 
-var logger = flogging.MustGetLogger("stocktx_cc")
+var logger = flogging.MustGetLogger("crowdfunding_contract")
 
-type StockTransaction struct {
-	ID        string  `json:"id"`
-	TradeDate string  `json:"trade_date"`
-	Buyer     string  `json:"buyer"`
-	Seller    string  `json:"seller"`
-	StockCode string  `json:"stock_code"`
-	Quantity  int     `json:"quantity"`
-	Price     float64 `json:"price"`
+type Project struct {
+	ProjectID        string  `json:"projectId"`
+	Title            string  `json:"title"`
+	Description      string  `json:"description"`
+	ShortDescription string  `json:"shortDescription"`
+	GoalAmount       float64 `json:"goalAmount"`
+	CurrentAmount    float64 `json:"currentAmount"`
+	IsClosed         bool    `json:"isClosed"`
 }
 
-// CreateShare adds a new share transaction to the ledger
-func (s *StockTxContract) CreateTx(ctx contractapi.TransactionContextInterface, stockTxDate string) (string, error) {
-	if len(stockTxDate) == 0 {
-		return "", fmt.Errorf("Please pass the correct stock transaction data")
-	}
-
-	var stockTransaction StockTransaction
-	err := json.Unmarshal([]byte(stockTxDate), &stockTransaction)
-	if err != nil {
-		return "", fmt.Errorf("Failed while unmarshling stock transaction. %s", err.Error())
-	}
-
-	stockTransactionAsBytes, err := json.Marshal(stockTransaction)
-	if err != nil {
-		return "", fmt.Errorf("Failed while marshling stock transaction. %s", err.Error())
-	}
-
-	return ctx.GetStub().GetTxID(), ctx.GetStub().PutState(stockTransaction.ID, stockTransactionAsBytes)
+type Contribution struct {
+	ProjectID     string  `json:"projectId"`
+	ContributorID string  `json:"contributorId"`
+	Amount        float64 `json:"amount"`
 }
 
-func (s *StockTxContract) GetStockTxById(ctx contractapi.TransactionContextInterface, stockTransactionID string) (*StockTransaction, error) {
-	if len(stockTransactionID) == 0 {
-		return nil, fmt.Errorf("Please provide correct  stock transaction data Id")
-		// return shim.Error("Incorrect number of arguments. Expecting 1")
+type Reward struct {
+	ProjectID         string  `json:"projectId"`
+	RewardLevel       string  `json:"rewardLevel"`
+	RewardDescription string  `json:"rewardDescription"`
+	MinContribution   float64 `json:"minContribution"`
+}
+
+type User struct {
+	UserID string `json:"userId"`
+	Role   string `json:"role"`
+}
+
+func (c *CrowdfundingContract) CreateProject(ctx contractapi.TransactionContextInterface, projectId, title, description string, shortDescription string, goalAmount float64, deadline string) error {
+
+	project := Project{
+		ProjectID:        projectId,
+		Title:            title,
+		Description:      description,
+		ShortDescription: shortDescription,
+		GoalAmount:       goalAmount,
+		CurrentAmount:    0,
+		IsClosed:         false,
 	}
 
-	stockTransactionAsBytes, err := ctx.GetStub().GetState(stockTransactionID)
-
+	projectJSON, err := json.Marshal(project)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to read from world state. %s", err.Error())
+		return err
 	}
 
-	if stockTransactionAsBytes == nil {
-		return nil, fmt.Errorf("%s does not exist", stockTransactionID)
+	return ctx.GetStub().PutState(projectId, projectJSON)
+}
+
+// Añade la contribución de un usuario a un proyecto
+func (c *CrowdfundingContract) Contribute(ctx contractapi.TransactionContextInterface, projectId, contributorId string, amount float64) error {
+	projectJSON, err := ctx.GetStub().GetState(projectId)
+	if err != nil || projectJSON == nil {
+		return fmt.Errorf("Failed to find project: %s", projectId)
 	}
 
-	stockTransaction := new(StockTransaction)
-	_ = json.Unmarshal(stockTransactionAsBytes, stockTransaction)
+	project := new(Project)
+	err = json.Unmarshal(projectJSON, project)
+	if err != nil {
+		return err
+	}
 
-	return stockTransaction, nil
+	project.CurrentAmount += amount
 
+	contribution := Contribution{
+		ProjectID:     projectId,
+		ContributorID: contributorId,
+		Amount:        amount,
+	}
+
+	contributionKey := fmt.Sprintf("%s_%s", projectId, contributorId)
+	contributionJSON, err := json.Marshal(contribution)
+	if err != nil {
+		return err
+	}
+
+	err = ctx.GetStub().PutState(contributionKey, contributionJSON)
+	if err != nil {
+		return err
+	}
+
+	updatedProjectJSON, err := json.Marshal(project)
+	if err != nil {
+		return err
+	}
+
+	return ctx.GetStub().PutState(projectId, updatedProjectJSON)
+}
+
+func (cc *CrowdfundingContract) DistributeRewards(ctx contractapi.TransactionContextInterface, projectID string) error {
+	projectJSON, err := ctx.GetStub().GetState(projectID)
+	if err != nil {
+		return fmt.Errorf("failed to read project: %v", err)
+	}
+	if projectJSON == nil {
+		return fmt.Errorf("project does not exist: %s", projectID)
+	}
+
+	var project Project
+	err = json.Unmarshal(projectJSON, &project)
+	if err != nil {
+		return fmt.Errorf("failed to unmarshal project: %v", err)
+	}
+
+	if project.CurrentAmount < project.GoalAmount {
+		return fmt.Errorf("goal amount not reached")
+	}
+
+	if project.IsClosed {
+		return fmt.Errorf("project is already closed")
+	}
+
+	project.IsClosed = true
+	projectJSON, err = json.Marshal(project)
+	if err != nil {
+		return fmt.Errorf("failed to marshal project: %v", err)
+	}
+
+	err = ctx.GetStub().PutState(projectID, projectJSON)
+	if err != nil {
+		return fmt.Errorf("failed to update project: %v", err)
+	}
+
+	resultsIterator, err := ctx.GetStub().GetStateByPartialCompositeKey("Contribution", []string{projectID})
+	if err != nil {
+		return fmt.Errorf("failed to get contributions: %v", err)
+	}
+	defer resultsIterator.Close()
+
+	for resultsIterator.HasNext() {
+		queryResponse, err := resultsIterator.Next()
+		if err != nil {
+			return err
+		}
+
+		var contribution Contribution
+		err = json.Unmarshal(queryResponse.Value, &contribution)
+		if err != nil {
+			return fmt.Errorf("failed to unmarshal contribution: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// Gestión de usuarios:
+
+func (c *CrowdfundingContract) RegisterUser(ctx contractapi.TransactionContextInterface, userId, role string) error {
+	user := User{
+		UserID: userId,
+		Role:   role,
+	}
+
+	userJSON, err := json.Marshal(user)
+	if err != nil {
+		return err
+	}
+
+	return ctx.GetStub().PutState(userId, userJSON)
+}
+
+func (cc *CrowdfundingContract) GetContributionsByUser(ctx contractapi.TransactionContextInterface, userId string) ([]Contribution, error) {
+	queryString := fmt.Sprintf(`{"selector":{"contributorId":"%s"}}`, userId)
+	resultsIterator, err := ctx.GetStub().GetQueryResult(queryString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get query result: %v", err)
+	}
+	defer resultsIterator.Close()
+
+	var contributions []Contribution
+	for resultsIterator.HasNext() {
+		queryResponse, err := resultsIterator.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		var contribution Contribution
+		err = json.Unmarshal(queryResponse.Value, &contribution)
+		if err != nil {
+			return nil, err
+		}
+		contributions = append(contributions, contribution)
+	}
+
+	return contributions, nil
+}
+
+func (cc *CrowdfundingContract) GetContributionsForCampaign(ctx contractapi.TransactionContextInterface, campaignId string) ([]Contribution, error) {
+	queryString := fmt.Sprintf(`{"selector":{"projectId":"%s"}}`, campaignId)
+	resultsIterator, err := ctx.GetStub().GetQueryResult(queryString)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get query result: %v", err)
+	}
+	defer resultsIterator.Close()
+
+	var contributions []Contribution
+	for resultsIterator.HasNext() {
+		queryResponse, err := resultsIterator.Next()
+		if err != nil {
+			return nil, err
+		}
+
+		var contribution Contribution
+		err = json.Unmarshal(queryResponse.Value, &contribution)
+		if err != nil {
+			return nil, err
+		}
+		contributions = append(contributions, contribution)
+	}
+
+	return contributions, nil
 }
 
 func main() {
-
-	chaincode, err := contractapi.NewChaincode(new(StockTxContract))
+	chaincode, err := contractapi.NewChaincode(&CrowdfundingContract{})
 	if err != nil {
-		fmt.Printf("Error create stocktx chaincode: %s", err.Error())
+		fmt.Printf("Error creating crowdfunding chaincode: %s", err)
+		logger.Errorf("Error creating crowdfunding chaincode: %s", err)
 		return
 	}
-	if err := chaincode.Start(); err != nil {
-		fmt.Printf("Error starting chaincodes: %s", err.Error())
-	}
 
+	if err := chaincode.Start(); err != nil {
+		fmt.Printf("Error starting crowdfunding chaincode: %s", err)
+		logger.Errorf("Error starting crowdfunding chaincode: %s", err)
+	}
 }
