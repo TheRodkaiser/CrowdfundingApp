@@ -119,6 +119,7 @@ app.post('/users', async function (req, res) {
 app.post('/register', async function (req, res) {
     var username = req.body.username;
     var orgName = req.body.orgName;
+    var orgName = req.body.password;
     logger.debug('End point : /users');
     logger.debug('User name : ' + username);
     logger.debug('Org name  : ' + orgName);
@@ -139,7 +140,7 @@ app.post('/register', async function (req, res) {
 
     console.log(token)
 
-    let response = await helper.registerAndGetSecret(username, orgName);
+    let response = await helper.registerAndGetSecret(username, orgName, password);
 
     logger.debug('-- returned from registering the username %s for organization %s', username, orgName);
     if (response && typeof response !== 'string') {
