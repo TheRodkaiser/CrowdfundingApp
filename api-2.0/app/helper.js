@@ -5,6 +5,7 @@ const path = require('path');
 const FabricCAServices = require('fabric-ca-client');
 const fs = require('fs');
 const mysql = require('mysql2/promise');
+const bcrypt = require('bcrypt');
 
 const util = require('util');
 
@@ -189,17 +190,24 @@ const isUserRegistered = async (username, userOrg, password) => {
                 host: 'localhost',
                 user: 'root',
                 password: 'root',
-                database: crowdfunding''
+                database: 'crowdfunding'
             });
 
-            const [rows] = await connection.execute('SELECT password FROM users WHERE username = ?', [username]);
+            const [rows] = await connection.execute('SELECT password FROM usuarios WHERE username = ?', [username]);
 
             await connection.end();
 
-            if (rows.length > 0 && rows[0].password === password) {
-                return true;
+            if (rows.length > 0) {
+                const hashedPassword = rows[0].password;
+                const match = await bcrypt.compare(password, hashedPassword);
+                if (match) {
+                    return true;
+                } else {
+                    console.log('Password does not match.');
+                    return false;
+                }
             } else {
-                console.log('Password does not match.');
+                console.log('No user found with the given username.');
                 return false;
             }
         } catch (error) {
