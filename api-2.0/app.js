@@ -139,7 +139,7 @@ app.post('/register', async function (req, res) {
 
     console.log(token)
 
-    let response = await helper.registerAndGerSecret(username, orgName);
+    let response = await helper.registerAndGetSecret(username, orgName);
 
     logger.debug('-- returned from registering the username %s for organization %s', username, orgName);
     if (response && typeof response !== 'string') {
